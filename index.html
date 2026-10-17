@@ -72,9 +72,9 @@
     <div class="bg-gray-800 border border-gray-700 rounded-2xl p-5 shadow-lg">
       <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
         <h2 class="text-lg font-bold text-gray-200 flex items-center gap-2">
-          <span>📋</span> Historial de Comandas Registradas
+          <span>📋</span> Historial de Comandas del Día
         </h2>
-        <span class="text-xs text-gray-400 italic">Incluye pedidos activos y entregados</span>
+        <span class="text-xs text-gray-400 italic">Filtrado exclusivamente para la jornada de hoy</span>
       </div>
 
       <div class="overflow-x-auto">
@@ -116,9 +116,20 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Mostrar fecha actual formateada
+    // Mostrar fecha actual formateada en la interfaz
     const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    document.getElementById('fecha-actual').innerText = new Date().toLocaleDateString('es-CL', opcionesFecha);
+    const fechaActualTexto = new Date().toLocaleDateString('es-CL', opcionesFecha);
+    document.getElementById('fecha-actual').innerText = fechaActualTexto;
+
+    // Obtener la fecha de hoy en formato numérico corto (ej: "17-10-2026" o "17/10/2026") para comparar con los registros
+    const hoyObjeto = new Date();
+    const diaHoy = String(hoyObjeto.getDate()).padStart(2, '0');
+    const mesHoy = String(hoyObjeto.getMonth() + 1).padStart(2, '0');
+    const anioHoy = hoyObjeto.getFullYear();
+    
+    // Formatos comunes en los que se guardan las fechas
+    const formatoGuion = `${diaHoy}-${mesHoy}-${anioHoy}`;
+    const formatoSlash = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
     // Escuchar cambios en las comandas en tiempo real
     db.ref('comandas').on('value', (snapshot) => {
@@ -135,16 +146,25 @@
       let deliveryCant = 0;
 
       if (!data) {
-        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No hay registros de ventas todavía.</td></tr>`;
+        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No hay registros de ventas para hoy.</td></tr>`;
         actualizarKPIs(0, 0, 0, 0, 0, 0);
         return;
       }
 
       let htmlFilas = '';
-      const keys = Object.keys(data).reverse(); // Mostrar los más recientes primero
+      const keys = Object.keys(data).reverse();
+      let contadorHoy = 0;
 
       keys.forEach(key => {
         const p = data[key];
+        const fechaPedido = p.fecha || '';
+
+        // Validar si el pedido pertenece al día de hoy revisando si contiene la fecha actual
+        const esDeHoy = fechaPedido.includes(formatoGuion) || fechaPedido.includes(formatoSlash);
+
+        if (!esDeHoy) return; // Si no es de hoy, lo omite de la caja diaria
+
+        contadorHoy++;
         const monto = p.total || 0;
         
         totalDinero += monto;
@@ -185,7 +205,12 @@
         `;
       });
 
-      tablaCuerpo.innerHTML = htmlFilas;
+      if (contadorHoy === 0) {
+        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No se han registrado ventas para el día de hoy todavía.</td></tr>`;
+      } else {
+        tablaCuerpo.innerHTML = htmlFilas;
+      }
+
       actualizarKPIs(totalDinero, totalPedidos, retiroDinero, retiroCant, deliveryDinero, deliveryCant);
     });
 
