@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Burger Kitchen | Cierre de Caja 📊</title>
+  <title>Burger Kitchen | Cierre de Caja Histórico 📊</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -17,15 +17,16 @@
   <header class="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center pb-6 border-b border-gray-800 gap-4">
     <div>
       <h1 class="text-3xl font-black text-emerald-400 tracking-wider flex items-center gap-2">
-        <span>📊</span> BURGER KITCHEN - CAJA DIARIA
+        <span>📊</span> BURGER KITCHEN - HISTORIAL DE CAJA
       </h1>
-      <p class="text-xs text-gray-400 mt-1">Control financiero y métricas de ventas en tiempo real</p>
+      <p class="text-xs text-gray-400 mt-1">Consulta y auditoría de ventas por fecha</p>
     </div>
     
     <div class="flex items-center gap-3">
-      <div class="bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-emerald-400 border border-emerald-900 flex items-center gap-2">
-        <span>📅 Fecha:</span>
-        <span id="fecha-actual" class="text-white">Cargando...</span>
+      <!-- Selector de Fecha -->
+      <div class="bg-gray-800 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-400 border border-emerald-900 flex items-center gap-2">
+        <span>📅 Seleccionar Fecha:</span>
+        <input type="date" id="filtro-fecha" class="bg-gray-900 text-white px-2 py-1 rounded border border-gray-700 text-xs focus:outline-none focus:border-emerald-500">
       </div>
       <a href="https://colo1010.github.io/paginacocina/" class="bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs px-4 py-2 rounded-xl border border-gray-700 font-bold transition">
         👨‍🍳 Ir a Cocina
@@ -68,13 +69,13 @@
 
     </div>
 
-    <!-- Sección de Detalle de Órdenes del Día -->
+    <!-- Sección de Detalle de Órdenes -->
     <div class="bg-gray-800 border border-gray-700 rounded-2xl p-5 shadow-lg">
       <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
         <h2 class="text-lg font-bold text-gray-200 flex items-center gap-2">
-          <span>📋</span> Historial de Comandas del Día
+          <span>📋</span> Historial de Comandas Filtradas
         </h2>
-        <span class="text-xs text-gray-400 italic">Filtrado exclusivamente para la jornada de hoy</span>
+        <span id="texto-filtro-activo" class="text-xs text-emerald-400 font-semibold">Mostrando ventas de la fecha seleccionada</span>
       </div>
 
       <div class="overflow-x-auto">
@@ -82,7 +83,7 @@
           <thead>
             <tr class="border-b border-gray-700 text-xs text-gray-400 uppercase tracking-wider">
               <th class="py-3 px-3">Ticket</th>
-              <th class="py-3 px-3">Hora</th>
+              <th class="py-3 px-3">Hora / Fecha</th>
               <th class="py-3 px-3">Cliente</th>
               <th class="py-3 px-3">Tipo</th>
               <th class="py-3 px-3">Estado</th>
@@ -91,7 +92,7 @@
           </thead>
           <tbody id="tabla-comandas-cuerpo" class="divide-y divide-gray-700/50 text-gray-300">
             <tr>
-              <td colspan="6" class="text-center py-6 text-gray-500 italic">Cargando registros de caja...</td>
+              <td colspan="6" class="text-center py-6 text-gray-500 italic">Cargando registros...</td>
             </tr>
           </tbody>
         </table>
@@ -116,55 +117,67 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Mostrar fecha actual formateada en la interfaz
-    const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    const fechaActualTexto = new Date().toLocaleDateString('es-CL', opcionesFecha);
-    document.getElementById('fecha-actual').innerText = fechaActualTexto;
-
-    // Obtener la fecha de hoy en formato numérico corto (ej: "17-10-2026" o "17/10/2026") para comparar con los registros
-    const hoyObjeto = new Date();
-    const diaHoy = String(hoyObjeto.getDate()).padStart(2, '0');
-    const mesHoy = String(hoyObjeto.getMonth() + 1).padStart(2, '0');
-    const anioHoy = hoyObjeto.getFullYear();
+    // Inicializar el selector de fecha con el día de hoy por defecto (formato YYYY-MM-DD para el input)
+    const inputFecha = document.getElementById('filtro-fecha');
+    const hoy = new Date();
+    const anio = hoy.getFullYear();
+    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dia = String(hoy.getDate()).padStart(2, '0');
+    const fechaHoyIso = `${anio}-${mes}-${dia}`;
     
-    // Formatos comunes en los que se guardan las fechas
-    const formatoGuion = `${diaHoy}-${mesHoy}-${anioHoy}`;
-    const formatoSlash = `${diaHoy}/${mesHoy}/${anioHoy}`;
+    inputFecha.value = fechaHoyIso;
 
-    // Escuchar cambios en las comandas en tiempo real
+    let datosGlobalesComandas = {};
+
+    // Escuchar cambios en Firebase en tiempo real
     db.ref('comandas').on('value', (snapshot) => {
-      const data = snapshot.val();
+      datosGlobalesComandas = snapshot.val() || {};
+      procesarYFiltrarVentas();
+    });
+
+    // Reaccionar cuando el usuario cambie la fecha en el calendario
+    inputFecha.addEventListener('change', () => {
+      procesarYFiltrarVentas();
+    });
+
+    function procesarYFiltrarVentas() {
       const tablaCuerpo = document.getElementById('tabla-comandas-cuerpo');
+      const fechaSeleccionadaInput = inputFecha.value; // Formato: "YYYY-MM-DD"
+      
+      if (!fechaSeleccionadaInput) return;
+
+      // Convertir la fecha seleccionada (YYYY-MM-DD) a formato DD-MM-YYYY y DD/MM/YYYY para comparar con Firebase
+      const [fAnio, fMes, fDia] = fechaSeleccionadaInput.split('-');
+      const formatoGuionBusqueda = `${fDia}-${fMes}-${fAnio}`;
+      const formatoSlashBusqueda = `${fDia}/${fMes}/${fAnio}`;
 
       let totalDinero = 0;
       let totalPedidos = 0;
-      
       let retiroDinero = 0;
       let retiroCant = 0;
-
       let deliveryDinero = 0;
       let deliveryCant = 0;
 
-      if (!data) {
-        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No hay registros de ventas para hoy.</td></tr>`;
+      if (!datosGlobalesComandas || Object.keys(datosGlobalesComandas).length === 0) {
+        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No hay registros en la base de datos.</td></tr>`;
         actualizarKPIs(0, 0, 0, 0, 0, 0);
         return;
       }
 
       let htmlFilas = '';
-      const keys = Object.keys(data).reverse();
-      let contadorHoy = 0;
+      const keys = Object.keys(datosGlobalesComandas).reverse();
+      let contadorFiltrados = 0;
 
       keys.forEach(key => {
-        const p = data[key];
+        const p = datosGlobalesComandas[key];
         const fechaPedido = p.fecha || '';
 
-        // Validar si el pedido pertenece al día de hoy revisando si contiene la fecha actual
-        const esDeHoy = fechaPedido.includes(formatoGuion) || fechaPedido.includes(formatoSlash);
+        // Comprobar si el pedido coincide con la fecha seleccionada en el calendario
+        const coincideFecha = fechaPedido.includes(formatoGuionBusqueda) || fechaPedido.includes(formatoSlash);
 
-        if (!esDeHoy) return; // Si no es de hoy, lo omite de la caja diaria
+        if (!coincideFecha) return; // Si no es de este día, omitir
 
-        contadorHoy++;
+        contadorFiltrados++;
         const monto = p.total || 0;
         
         totalDinero += monto;
@@ -178,7 +191,6 @@
           retiroCant++;
         }
 
-        // Estilos de badge para estado
         let badgeEstado = `<span class="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-[11px] font-bold">Pendiente</span>`;
         if (p.estado === 'en_preparacion') {
           badgeEstado = `<span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded text-[11px] font-bold">En Cocina</span>`;
@@ -188,7 +200,6 @@
           badgeEstado = `<span class="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-[11px] font-bold">Entregado</span>`;
         }
 
-        // Tipo de entrega badge
         let badgeTipo = p.tipoEntrega === 'delivery' 
           ? `<span class="text-amber-400 font-semibold">🛵 Delivery</span>` 
           : `<span class="text-blue-400 font-semibold">🛍️ Retiro</span>`;
@@ -205,14 +216,14 @@
         `;
       });
 
-      if (contadorHoy === 0) {
-        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No se han registrado ventas para el día de hoy todavía.</td></tr>`;
+      if (contadorFiltrados === 0) {
+        tablaCuerpo.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500 italic">No se registraron ventas para la fecha seleccionada.</td></tr>`;
       } else {
         tablaCuerpo.innerHTML = htmlFilas;
       }
 
       actualizarKPIs(totalDinero, totalPedidos, retiroDinero, retiroCant, deliveryDinero, deliveryCant);
-    });
+    }
 
     function actualizarKPIs(totDin, totPed, retDin, retCant, delDin, delCant) {
       document.getElementById('kpi-total-dinero').innerText = `$${totDin.toLocaleString('es-CL')} CLP`;
