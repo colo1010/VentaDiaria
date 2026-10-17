@@ -102,7 +102,6 @@
   </main>
 
   <script>
-    // Configuración e Inicialización de Firebase Realtime Database
     const firebaseConfig = {
       apiKey: "AIzaSyCI3CWPBGqBsq30CC3AouVu3p4uhkNOkrw",
       authDomain: "comandas-114cc.firebaseapp.com",
@@ -117,25 +116,18 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Inicializar el selector de fecha con el día de hoy por defecto (formato YYYY-MM-DD para el input)
+    // Inicializar selector de fecha con el día de hoy
     const inputFecha = document.getElementById('filtro-fecha');
     const hoy = new Date();
-    const anio = hoy.getFullYear();
-    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
-    const dia = String(hoy.getDate()).padStart(2, '0');
-    const fechaHoyIso = `${anio}-${mes}-${dia}`;
-    
-    inputFecha.value = fechaHoyIso;
+    inputFecha.value = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
 
     let datosGlobalesComandas = {};
 
-    // Escuchar cambios en Firebase en tiempo real
     db.ref('comandas').on('value', (snapshot) => {
       datosGlobalesComandas = snapshot.val() || {};
       procesarYFiltrarVentas();
     });
 
-    // Reaccionar cuando el usuario cambie la fecha en el calendario
     inputFecha.addEventListener('change', () => {
       procesarYFiltrarVentas();
     });
@@ -146,10 +138,7 @@
       
       if (!fechaSeleccionadaInput) return;
 
-      // Convertir la fecha seleccionada (YYYY-MM-DD) a formato DD-MM-YYYY y DD/MM/YYYY para comparar con Firebase
       const [fAnio, fMes, fDia] = fechaSeleccionadaInput.split('-');
-      const formatoGuionBusqueda = `${fDia}-${fMes}-${fAnio}`;
-      const formatoSlashBusqueda = `${fDia}/${fMes}/${fAnio}`;
 
       let totalDinero = 0;
       let totalPedidos = 0;
@@ -170,12 +159,25 @@
 
       keys.forEach(key => {
         const p = datosGlobalesComandas[key];
-        const fechaPedido = p.fecha || '';
+        const fechaPedidoStr = p.fecha || ''; // Ej: "16-10-2026, 1:57:32 p. m."
 
-        // Comprobar si el pedido coincide con la fecha seleccionada en el calendario
-        const coincideFecha = fechaPedido.includes(formatoGuionBusqueda) || fechaPedido.includes(formatoSlash);
+        // Extraer los números de día, mes y año de la fecha almacenada en Firebase de forma flexible
+        // Buscamos patrones de fecha DD-MM-YYYY o DD/MM/YYYY
+        const soloFechaParte = fechaPedidoStr.split(',')[0].trim(); // "16-10-2026" o "16/10/2026"
+        const partesFecha = soloFechaParte.split(/[-/]/); // [16, 10, 2026]
 
-        if (!coincideFecha) return; // Si no es de este día, omitir
+        if (partesFecha.length === 3) {
+          const pDia = partesFecha[0].padStart(2, '0');
+          const pMes = partesFecha[1].padStart(2, '0');
+          const pAnio = partesFecha[2];
+
+          // Comprobar coincidencia exacta de Día, Mes y Año
+          if (pDia !== fDia || pMes !== fMes || pAnio !== fAnio) {
+            return; // Omitir si no coincide
+          }
+        } else {
+          return; // Si el formato no es válido, se omite
+        }
 
         contadorFiltrados++;
         const monto = p.total || 0;
